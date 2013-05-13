@@ -1105,12 +1105,33 @@ int aviMoviChunkLoad(FILE* file, DWORD nMoviSize, DWORD *pChunkSize, BYTE** ppBu
     int* data;
     BYTE *pChunk;
     int elementSize;
+    int pre_pos, cur_pos;
 
     pos = -1;
     int bytesLeft = nMoviSize;
     do 
     {
+        //pre_pos = ftell(file);
         data = readInts(file, 2);
+        //cur_pos = ftell(file);
+
+        //check trunk header read postion correct or not
+        //printf("\t\t >>> file read error: pre=%d, cur=%d\n", pre_pos, cur_pos);
+
+        ////////////////////////////////////////////////////////////////////
+        // Note: we can use some tool (such as Riffpad to help debug)
+        // Riffpad would list one trunk as below 
+        // 01wb - (len=1024, off=28040)
+        // 00dc - (len=0, off=29072)
+        // 00dc - (len=0,off=29080)
+        // 00dc - (len=60555,off=29088)
+        // 01wb - (len=1024,off=89652)
+        // 00dc - (len=59581,off=90684)
+        // 01wb - (len=1024,off=150274)
+        // the 'len' is below 'elementSize'
+        // the 'off' is above 'cur_pos'
+        /////////////////////////////////////////////////////////////////////
+
         bytesLeft -= 2*sizeof(int);
 
         if(NULL == data)
@@ -1147,6 +1168,19 @@ int aviMoviChunkLoad(FILE* file, DWORD nMoviSize, DWORD *pChunkSize, BYTE** ppBu
             fread( (pChunk+LENGTH_8BYTES), elementSize, 1, file);
         }
         bytesLeft -= elementSize;
+
+        //handle elementSize != 2*n (not 4*n, the FIFA avi show it should be 2*n, who know why ??), 
+        //then we needs skip some dummy data, otherwise it would lead to read next trunk header error.
+        // see below trunk info
+        // 00dc - (len=60555,off=29088)
+        // 01wb - (len=1024,off=89652)
+        // 00dc - (len=59581,off=90684)
+        // 01wb - (len=1024,off=150274)
+        if(elementSize & 0x1)
+        {
+            skipData(file, 1);
+            bytesLeft -= 1;
+        }
 
     } while ( (bytesLeft > 0) && (pos < 0));
 

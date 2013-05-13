@@ -16,7 +16,7 @@
 #define APP_TRACE 	    printf
 #define APP_ERROR 	    printf(">>> Error\n"); printf
 #else
-#define APP_TRACE 	    //
+#define APP_TRACE 	    //printf
 #define APP_INFO 	    printf
 #define APP_ERROR 	    printf(">>> Error\n"); printf
 #endif
@@ -395,8 +395,10 @@ int _tmain0(int argc, _TCHAR* argv[])
 #define PW_BLIT_EVENT   (SDL_USEREVENT)
 #define PW_FLIP_EVENT (SDL_USEREVENT + 1)
 #define PW_QUIT_EVENT (SDL_USEREVENT + 2)
+#define PW_FRAME_REPEAT (SDL_USEREVENT+3)
 
-#define TIME_CTRL_0   0
+
+#define TIME_CTRL_0   0                     //not suggested used. code doesn't complete to support 0 size vids trunk which is used for delay one frame time.
 #define TIME_CTRL_1   1
 #define REFRESH_TIME_CTRL   TIME_CTRL_1
 
@@ -489,13 +491,14 @@ int decode_thread(void *arg)
         struct AVI_chunk_hdr *pChunkHdr = (struct AVI_chunk_hdr *)pMoviChunk;
 
 
-        APP_TRACE("\t Found movi chunk [%c%c%c%c][%d bytes].\n", 
+        APP_TRACE("\t Found movi chunk [%c%c%c%c][%d bytes] @[%d].\n", 
             pChunkHdr->chunk_id[0], pChunkHdr->chunk_id[1], pChunkHdr->chunk_id[2], pChunkHdr->chunk_id[3],
-            pChunkHdr->sz);
+            pChunkHdr->sz, nMChunkPos);
 
         nImgPos = aviMoviChunkParse(pMoviChunk, nMoviChunkSize, nVidsNo, &sImgInfo);
 
-        if(nImgPos >= 0)
+        if(nImgPos >= 0 
+            && (pChunkHdr->sz > 0))         //add to handle 0 size vids trunk 
         {
             ASSERT(sImgInfo.ImgType == eImgJpg );
             pImg = pMoviChunk + nImgPos;
@@ -506,7 +509,46 @@ int decode_thread(void *arg)
             {
                 printf("Can't create bitmap surface from buffer [%x %x %x %x]\n", pImg[0], pImg[1], pImg[2], pImg[3]);
             }
+            else
+            {
+                // wait until we store sBitmapSurface & sBlitLTPoint to paviState structure;
+                SDL_LockMutex(paviState->mutex);
+                //paviState->bBlited = 1: we can overwrite sBitmapSurface & sBlitLTPoint. 
+                //0: we need wait previous surface blited before overwrite.
+                while( !paviState->bBlited && !paviState->quit) 
+                {
+                    SDL_CondWait(paviState->cond, paviState->mutex);
+                }
+                SDL_UnlockMutex(paviState->mutex);
 
+                if(paviState->quit)
+                {
+                    //free alloc buffers;
+                    SDL_FreeSurface(sBitmapSurface.bitmap);
+                    free(sBitmapSurface.buffer);
+                }
+                else
+                {
+
+                    paviState->sBitmapSurface = sBitmapSurface;
+                    paviState->sBlitLTPoint.x = sImgInfo.sLTPnt.nLeft;
+                    paviState->sBlitLTPoint.y = sImgInfo.sLTPnt.nTop;
+                    paviState->bBlited        = 0;              //change flag to indicate this surface not be blited.
+
+
+                    SDL_Event event;
+                    // Let main thread to handle blit operation.
+                    event.type = PW_BLIT_EVENT;
+                    event.user.data1 = paviState;
+                    SDL_PushEvent(&event);
+
+                }
+            }
+        }
+        else if((nImgPos >= 0) && 
+            (pChunkHdr->sz == 0))    //add to handle 0 size vids trunk, which is used to delay one frame time
+        {
+            //although we don't need to do blit, we still follow the wait scheme like blit, it would keep not break pipeline's rule
             // wait until we store sBitmapSurface & sBlitLTPoint to paviState structure;
             SDL_LockMutex(paviState->mutex);
             //paviState->bBlited = 1: we can overwrite sBitmapSurface & sBlitLTPoint. 
@@ -519,25 +561,15 @@ int decode_thread(void *arg)
 
             if(paviState->quit)
             {
-                //free alloc buffers;
-                SDL_FreeSurface(sBitmapSurface.bitmap);
-                free(sBitmapSurface.buffer);
+                //do nothing;
             }
             else
             {
-
-                paviState->sBitmapSurface = sBitmapSurface;
-                paviState->sBlitLTPoint.x = sImgInfo.sLTPnt.nLeft;
-                paviState->sBlitLTPoint.y = sImgInfo.sLTPnt.nTop;
-                paviState->bBlited        = 0;              //change flag to indicate this surface not be blited.
-
-
                 SDL_Event event;
                 // Let main thread to handle blit operation.
-                event.type = PW_BLIT_EVENT;
+                event.type = PW_FRAME_REPEAT;
                 event.user.data1 = paviState;
                 SDL_PushEvent(&event);
-
             }
         }
 
@@ -671,7 +703,7 @@ static void schedule_refresh(VideoState *is, int delay)
 
 int _tmain(int argc, _TCHAR* argv[])
 {
-    if(argc<1)
+    if(argc<2)
     {
         APP_ERROR("Please type %s aviFileName\n", argv[0]);
         return -1;
@@ -792,6 +824,29 @@ int _tmain(int argc, _TCHAR* argv[])
             return 0;
             break;
 
+        case PW_FRAME_REPEAT:
+                if(REFRESH_TIME_CTRL == TIME_CTRL_0)
+                {
+                    //we not plan to support for TIME_CTRL_0 mode.
+                }
+                else
+                {
+                    // we just need to advanced the cnt, then next frame refresh would has such delay time.
+                    aviStream.nCurFrameCnt++;
+
+                    //for repeat frame case, if it is first frame, we needs update the nRefTicks
+                    if(1 == aviStream.nCurFrameCnt)
+                    {
+                        aviStream.nRefTicks = SDL_GetTicks();
+                    }
+
+                    printf("\t\t [%d] frame repeat. frame timing ctrl 1\n", aviStream.nCurFrameCnt);
+                }
+
+
+
+            break;
+
         case PW_BLIT_EVENT:
             res = doBlit(event.user.data1);
 
@@ -825,8 +880,8 @@ int _tmain(int argc, _TCHAR* argv[])
                     delay = (nTargetTicks > ticks)? (nTargetTicks - ticks) : 0;
                     schedule_refresh(&aviStream, delay);
 
-                    printf("\t\t [%d] delay tick = %d Ms. frame timing ctrl 1\n", aviStream.nCurFrameCnt, delay);
-
+                    //printf("\t\t [%d] delay tick = %d Ms. frame timing ctrl 1\n", aviStream.nCurFrameCnt, delay);
+                    printf("\t\t [%d] delay tick = %d Ms. Show at %d Ms. frame timing ctrl 1\n", aviStream.nCurFrameCnt, delay, nTargetTicks-aviStream.nRefTicks);
                 }
 
             }
