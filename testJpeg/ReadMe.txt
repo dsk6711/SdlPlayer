@@ -6,7 +6,7 @@ AppWizard has created this testJpeg application for you.
 
 This project is build by VC 2010
 And developmented by yshi. 
-Test git staged, amend
+Test git staged, amend. We add change in master br for git merge.
 
 This file contains a summary of what you will find in each of the files that
 make up your testJpeg application.
