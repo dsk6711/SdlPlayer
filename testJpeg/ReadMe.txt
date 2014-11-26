@@ -6,7 +6,7 @@ AppWizard has created this testJpeg application for you.
 
 This project is build by VC 2010
 And developmented by yshi. 
-Test git staged, amend
+Test git staged, amend. We also make one conflict in test br. 
 
 This file contains a summary of what you will find in each of the files that
 make up your testJpeg application.
@@ -20,6 +20,9 @@ testJpeg.vcproj
 
 testJpeg.cpp
     This is the main application source file.
+
+/////////////////////////////////////////////////////////////////////////////
+this is test br added line for git merge
 
 /////////////////////////////////////////////////////////////////////////////
 Other standard files:
