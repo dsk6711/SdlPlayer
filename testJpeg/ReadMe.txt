@@ -8,6 +8,9 @@ This project is build by VC 2010
 And developmented by yshi. 
 Test git staged, amend. We add change in master br for git merge, we also make one conflict in test br.
 
+Here we are going to test remote repo git pull/push/fetch. 
+First is push.
+
 This file contains a summary of what you will find in each of the files that
 make up your testJpeg application.
 
